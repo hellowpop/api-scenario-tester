@@ -1,0 +1,34 @@
+version: 1
+common:
+  sessions: "1"
+  iterations: "1"
+  waitPattern: "FIXED"
+  waitMinMs: "0"
+  waitMaxMs: "0"
+  continueOnFailure: "false"
+  host.postman.baseUrl: "https://api.example.com"
+resultFormat:
+  output: "results.yml"
+  includeCallDetails: "true"
+  percentiles: "50,90,95,99"
+  trimPercent: "5"
+scripts: []
+subScenarios: []
+mainScenarios:
+- order: "1"
+  name: "Get user"
+  enabled: "true"
+  host: "postman"
+  method: "GET"
+  path: "/users/${global.userId}?verbose=true"
+  headers: "{\"X-Tenant\":\"${global.tenantId}\"}"
+  expectedStatus: "200-299"
+- order: "2"
+  name: "Create user"
+  enabled: "true"
+  host: "postman"
+  method: "POST"
+  path: "/users"
+  headers: "{\"Content-Type\":\"application/json\"}"
+  body: "{\"name\":\"${global.userName}\"}"
+  expectedStatus: "200-299"

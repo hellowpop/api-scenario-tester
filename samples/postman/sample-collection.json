@@ -1,0 +1,67 @@
+{
+  "info": {
+    "name": "API Scenario Tester sample",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenantId}}"
+              }
+            ],
+            "url": {
+              "raw": "https://api.example.com/users/{{userId}}?verbose=true"
+            }
+          }
+        },
+        {
+          "name": "Create user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('created', function () { pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"{{userName}}\"}"
+            },
+            "url": {
+              "raw": "https://api.example.com/users"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+---
+warnings:
+- "ResponseAssertion is not converted: created status"

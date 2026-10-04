@@ -1,0 +1,4 @@
+---
+warnings:
+- "Collection authentication helper is not converted: bearer"
+- "Create user test script is not converted"
