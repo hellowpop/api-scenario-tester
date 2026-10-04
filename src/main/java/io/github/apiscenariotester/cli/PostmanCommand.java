@@ -28,8 +28,12 @@ public final class PostmanCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        String stage = "read input";
         try {
             ConversionResult conversion = reader.read(input);
+            stage = "prepare output";
+            OutputFiles.archiveExisting(commandSpec.commandLine().getOut(), output, PostmanScenarioWriter.warningPath(output));
+            stage = "write output";
             writer.write(conversion, output);
             commandSpec.commandLine().getOut().printf(
                     "Converted %d request(s): %s%n", conversion.scenarios().size(), output);
@@ -38,9 +42,9 @@ public final class PostmanCommand implements Callable<Integer> {
                         "Warnings: " + PostmanScenarioWriter.warningPath(output));
             }
             return 0;
-        } catch (IOException exception) {
+        } catch (IOException | RuntimeException exception) {
             commandSpec.commandLine().getErr().println(
-                    "Unable to convert Postman collection: " + exception.getMessage());
+                    "Unable to convert Postman collection: " + ConversionDiagnostics.describe(stage, input, output, exception));
             return 2;
         }
     }

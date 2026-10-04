@@ -172,5 +172,5 @@ Expected: 0 failures, 0 errors
 
 - [x] **Step 3: 패키징과 CLI 스모크 테스트**
 
-Run: `mvn package` 후 `java -jar target/api-scenario-tester-0.1.0-SNAPSHOT.jar --help`
+Run: `mvn package` 후 `java -jar target/api-scenario-tester.jar --help`
 Expected: 두 명령 종료 코드 0, 도움말에 공개 명령 4개 표시

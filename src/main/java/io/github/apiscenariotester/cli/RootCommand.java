@@ -8,12 +8,12 @@ import picocli.CommandLine.Command;
 
 @Command(
         name = "api-scenario-tester",
-        description = "Executes REST API scenarios defined in Excel.",
+        description = "Executes sequential YAML API scenarios using curl.",
         mixinStandardHelpOptions = true,
         subcommands = {
             TemplateCommand.class,
-            RootCommand.ValidatePlaceholder.class,
-            RootCommand.RunPlaceholder.class,
+            ValidateCommand.class,
+            RunCommand.class,
             ConvertCommand.class
         })
 public final class RootCommand implements Callable<Integer> {
@@ -33,22 +33,6 @@ public final class RootCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         return 0;
-    }
-
-    @Command(name = "validate", description = "Validates scenario input without HTTP calls.")
-    static final class ValidatePlaceholder implements Callable<Integer> {
-        @Override
-        public Integer call() {
-            return 0;
-        }
-    }
-
-    @Command(name = "run", description = "Runs an API scenario.")
-    static final class RunPlaceholder implements Callable<Integer> {
-        @Override
-        public Integer call() {
-            return 0;
-        }
     }
 
 }

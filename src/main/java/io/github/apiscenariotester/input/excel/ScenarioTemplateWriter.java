@@ -46,7 +46,7 @@ public final class ScenarioTemplateWriter {
                     "result_format",
                     headerStyle,
                     List.of(
-                            List.of("output", "results.yml"),
+                            List.of("output", "results.xlsx"),
                             List.of("includeCallDetails", "true"),
                             List.of("percentiles", "50,90,95,99"),
                             List.of("trimPercent", "5")));

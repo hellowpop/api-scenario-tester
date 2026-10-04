@@ -38,7 +38,7 @@ class ScenarioTemplateWriterTest {
             assertRow(workbook.getSheet("common"), 6, "continueOnFailure", "false");
 
             assertHeaders(workbook.getSheet("result_format"), "key", "value");
-            assertRow(workbook.getSheet("result_format"), 1, "output", "results.yml");
+            assertRow(workbook.getSheet("result_format"), 1, "output", "results.xlsx");
             assertRow(workbook.getSheet("result_format"), 2, "includeCallDetails", "true");
             assertRow(workbook.getSheet("result_format"), 3, "percentiles", "50,90,95,99");
             assertRow(workbook.getSheet("result_format"), 4, "trimPercent", "5");

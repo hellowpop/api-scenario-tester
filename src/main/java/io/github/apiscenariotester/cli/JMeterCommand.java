@@ -19,8 +19,12 @@ public final class JMeterCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        String stage = "read input";
         try {
             ConversionResult result = new JMeterTestPlanReader().read(input);
+            stage = "prepare output";
+            OutputFiles.archiveExisting(commandSpec.commandLine().getOut(), output, JMeterScenarioWriter.warningPath(output));
+            stage = "write output";
             new JMeterScenarioWriter().write(result, output);
             commandSpec.commandLine().getOut().printf("Converted %d request(s): %s%n", result.scenarios().size(), output);
             if (!result.warnings().isEmpty()) {
@@ -28,7 +32,7 @@ public final class JMeterCommand implements Callable<Integer> {
             }
             return 0;
         } catch (IOException | RuntimeException exception) {
-            commandSpec.commandLine().getErr().println("Unable to convert JMeter test plan: " + exception.getMessage());
+            commandSpec.commandLine().getErr().println("Unable to convert JMeter test plan: " + ConversionDiagnostics.describe(stage, input, output, exception));
             return 2;
         }
     }
