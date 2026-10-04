@@ -12,7 +12,10 @@ import java.nio.file.StandardOpenOption;
 public final class ScenarioYamlCodec {
 
     private final ObjectMapper mapper = new ObjectMapper(
-            YAMLFactory.builder().disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER).build());
+            YAMLFactory.builder()
+                    .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
+                    .enable(YAMLGenerator.Feature.LITERAL_BLOCK_STYLE)
+                    .build());
 
     public ScenarioDocument read(Path input) throws IOException {
         return mapper.readValue(input.toFile(), ScenarioDocument.class);

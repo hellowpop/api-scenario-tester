@@ -688,3 +688,10 @@ SUBSET 지정 행 자체와 curl 실행 전 PRE 실패·중단에는 실제 HTTP
 `OutputFiles`는 한 보관 작업의 timestamp를 한 번 생성하여 변환 결과와 경고 파일에 공유한다. 동일 이름이 이미 있으면 timestamp를 유지하고 `_1`, `_2` 등의 일련번호를 추가한다. `Files.move`는 기존 보관 파일을 교체하지 않는다. 테스트용 Clock 주입 경로를 추가하여 고정 시각에서 여러 충돌과 연속 보관을 재현했다.
 
 기존 CLI 테스트의 UUID 기대값을 timestamp로 변경한 후 구현 전 네 실패를 확인했다. 파일 내용 보존, 유효한 날짜 형식, 같은 timestamp의 번호 충돌 처리, 기본 시간대 적용, 결과·경고 파일의 timestamp 일치, 마지막 확장자 및 확장자 없는 이름을 검증했다. 최종 Maven `package`: 70 tests, failures 0, errors 0, BUILD SUCCESS. `target/api-scenario-tester.jar`를 갱신했고 README·현재 실행 계약·보관 계획을 수정했다.
+
+## 27. Excel 변환 YAML 개행 표시 (2026-10-05)
+
+`ScenarioYamlCodec`의 YAML generator에 `LITERAL_BLOCK_STYLE`을 적용했다. Excel 셀의 여러 줄 스크립트·요청 본문·공통 설정은 실제 개행을 표시하는 literal block으로 출력한다. `|-`, `|`, `|+`로 끝 개행 수를 표현하며 빈 줄과 들여쓰기를 보존한다. 변환 명령과 데이터 구조는 유지한다.
+
+CLI 회귀 테스트는 Excel → YAML → Excel 왕복에서 여러 줄 스크립트, 빈 줄, JSON 들여쓰기, 끝 개행 0/1/2개의 동일성을 검사한다.
+`mvn package`: 71 tests, failures 0, errors 0, BUILD SUCCESS. `target/api-scenario-tester.jar`를 갱신했다.

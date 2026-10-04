@@ -16,6 +16,26 @@ class ScenarioFormatCommandTest {
 
     @TempDir Path tempDirectory;
 
+    @Test void excelConversionDisplaysMultilineYamlAndPreservesOriginalText() throws Exception {
+        String script = "var token = response.headers['x-token'];\n\n" +
+                "global['x-token'] = token[0];";
+        var expected = new ScenarioDocument(1, Map.of("description", "first\nsecond\n"), Map.of(),
+                List.of(Map.of("id", "extract-token", "phase", "POST", "body", script)), List.of(),
+                List.of(Map.of("order", "1", "body", "{\n  \"name\": \"user\"\n}\n\n")));
+        Path source = tempDirectory.resolve("source.xlsx"), yaml = tempDirectory.resolve("scenario.yml"),
+                restored = tempDirectory.resolve("restored.xlsx");
+        new ScenarioExcelCodec().write(expected, source);
+        var console = new StringWriter();
+        assertThat(new RootCommand().execute(console, "convert", "excel", "--input", source.toString(),
+                "--output", yaml.toString())).isZero();
+        assertThat(Files.readString(yaml)).contains("|-", "|+", "  var token = response.headers['x-token'];")
+                .doesNotContain("\\n");
+        assertThat(new io.github.apiscenariotester.scenario.ScenarioYamlCodec().read(yaml)).isEqualTo(expected);
+        assertThat(new RootCommand().execute(console, "convert", "yaml", "--input", yaml.toString(),
+                "--output", restored.toString())).isZero();
+        assertThat(new ScenarioExcelCodec().read(restored)).isEqualTo(expected);
+    }
+
     @Test void missingExcelInputReportsCauseStageAndAbsolutePaths() throws Exception {
         Path input = tempDirectory.resolve("login-user-scenario.yml"), output = tempDirectory.resolve("output.yml");
         Files.writeString(output,"keep"); var console = new StringWriter();

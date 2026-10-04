@@ -81,6 +81,8 @@ java -jar target/api-scenario-tester.jar convert excel `
 
 YAML을 다시 Excel 편집 형식으로 변환할 수도 있습니다.
 
+Excel 셀의 여러 줄 스크립트와 요청 본문은 YAML의 `|` 블록 형식으로 출력하여 원문의 줄바꿈을 표시합니다. 빈 줄과 마지막 개행도 보존하며, 마지막 개행 수에 따라 `|-`, `|`, `|+`가 사용됩니다.
+
 ```powershell
 java -jar target/api-scenario-tester.jar convert yaml `
   --input scenario.yml `
