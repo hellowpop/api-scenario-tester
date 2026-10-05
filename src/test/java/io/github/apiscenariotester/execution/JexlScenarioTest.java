@@ -75,7 +75,7 @@ class JexlScenarioTest {
             assertThat(code).isZero(); assertThat(calls).containsExactly("/api/login","/api/user/list","/api/user/42/get","/api/logout");
             try (var workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook(output.toFile())) {
                 var sheet = workbook.getSheet("calls"); assertThat(sheet.getLastRowNum()).isEqualTo(4);
-                for (int index = 1; index <= 4; index++) assertThat(sheet.getRow(index).getCell(10).getHyperlink()).isNotNull();
+                for (int index = 1; index <= 4; index++) assertThat(sheet.getRow(index).getCell(11).getHyperlink()).isNotNull();
             }
         } finally { server.stop(0); }
     }
@@ -98,8 +98,8 @@ class JexlScenarioTest {
                 assertThat(code).isEqualTo(1); assertThat(calls).containsExactly("/api/login");
                 try (var workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook(output.toFile())) {
                     var sheet = workbook.getSheet("calls"); assertThat(sheet.getLastRowNum()).isEqualTo(1);
-                    assertThat(sheet.getRow(1).getCell(9).getStringCellValue()).contains("missing a non-empty x-token header");
-                    assertThat(sheet.getRow(1).getCell(10).getHyperlink()).isNotNull();
+                    assertThat(sheet.getRow(1).getCell(10).getStringCellValue()).contains("missing a non-empty x-token header");
+                    assertThat(sheet.getRow(1).getCell(11).getHyperlink()).isNotNull();
                 }
             } finally { server.stop(0); }
         }

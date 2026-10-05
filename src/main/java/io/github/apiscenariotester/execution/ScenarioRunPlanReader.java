@@ -10,6 +10,8 @@ import io.github.apiscenariotester.script.JexlRuntime;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -31,6 +33,7 @@ public final class ScenarioRunPlanReader {
 
     public ScenarioRunPlan read(Path scenario, Path config) throws IOException {
         ScenarioDocument document = new ScenarioYamlCodec().read(scenario);
+        Path scenarioDirectory = scenario.toAbsolutePath().normalize().getParent();
         scripts = new JexlRuntime(document.scripts());
         Map<String, Object> runtime = config == null ? Map.of() : new ObjectMapper(new YAMLFactory())
                 .readValue(config.toFile(), new TypeReference<Map<String, Object>>() { });
@@ -41,8 +44,7 @@ public final class ScenarioRunPlanReader {
         objectMap(runtime.get("hosts"), "hosts").forEach((name, value) ->
                 objectMap(value, "host " + name).forEach((key, setting) ->
                         common.put("host." + name + "." + key, environment(scalar(setting, "host." + name + "." + key)))));
-        if (positiveInt(common.getOrDefault("sessions", "1"), "sessions") != 1)
-            throw new IllegalArgumentException("parallel sessions are not supported; sessions must be 1");
+        int sessions = positiveInt(common.getOrDefault("sessions", "1"), "sessions");
         int iterations = positiveInt(common.getOrDefault("iterations", "1"), "iterations");
         boolean continueOnFailure = bool(common.getOrDefault("continueOnFailure", "false"), "continueOnFailure");
         long min = nonNegative(common.getOrDefault("waitMinMs", "0"), "waitMinMs");
@@ -57,7 +59,7 @@ public final class ScenarioRunPlanReader {
             String id = required(row, "subsetId");
             if (!row.getOrDefault("preSubsets", "").isBlank()) throw new IllegalArgumentException("nested subsets are not supported: " + id);
             if (row.getOrDefault("method", "").equalsIgnoreCase("SUBSET")) throw new IllegalArgumentException("nested SUBSET calls are not supported: " + id);
-            subsets.computeIfAbsent(id, ignored -> new ArrayList<>()).add(step(row, common));
+            subsets.computeIfAbsent(id, ignored -> new ArrayList<>()).add(step(row, common, scenarioDirectory));
         }
         subsets.forEach((id, rows) -> sortAndCheck(rows, "subset " + id));
         List<Map<String, String>> main = new ArrayList<>(document.mainScenarios());
@@ -77,7 +79,7 @@ public final class ScenarioRunPlanReader {
                 if (bool(row.getOrDefault("enabled", "true"), "enabled")) steps.addAll(subsets.get(id));
                 continue;
             }
-            ScenarioRunPlan.Step step = step(row, common);
+            ScenarioRunPlan.Step step = step(row, common, scenarioDirectory);
             if (!mainOrders.add(step.order())) throw new IllegalArgumentException("duplicate main order: " + step.order());
             List<ScenarioRunPlan.Step> before = new ArrayList<>();
             for (String id : csv(row.getOrDefault("preSubsets", ""))) {
@@ -93,10 +95,10 @@ public final class ScenarioRunPlanReader {
         new io.github.apiscenariotester.report.StatisticsCalculator().calculate(List.of(0L), trim, percentiles);
         String output = format.getOrDefault("output", "results.xlsx");
         if (output.toLowerCase(Locale.ROOT).matches(".*\\.ya?ml$")) output = output.replaceFirst("(?i)\\.ya?ml$", ".xlsx");
-        return new ScenarioRunPlan(steps, iterations, continueOnFailure, wait, executable, Path.of(output), trim, percentiles, globals, scripts);
+        return new ScenarioRunPlan(steps, sessions, iterations, continueOnFailure, wait, executable, Path.of(output), trim, percentiles, globals, scripts);
     }
 
-    private ScenarioRunPlan.Step step(Map<String, String> row, Map<String, String> common) throws IOException {
+    private ScenarioRunPlan.Step step(Map<String, String> row, Map<String, String> common, Path scenarioDirectory) throws IOException {
         String name = required(row, "name");
         try {
             Map<String, List<String>> scriptIds = new LinkedHashMap<>();
@@ -111,13 +113,17 @@ public final class ScenarioRunPlanReader {
             String path = required(row, "path");
             String host = row.getOrDefault("host", "");
             String base = common.getOrDefault("host." + host + ".baseUrl", "");
+            String referenceUrl = common.getOrDefault("host." + host + ".referenceUrl", "");
+            ReferenceTarget reference = referenceUrl.isBlank() ? null : ReferenceTarget.validated(base, referenceUrl, scripts,
+                    ComparisonRules.compile(common.getOrDefault("host." + host + ".compareSkipHeader", common.getOrDefault("compareSkipHeader", "")),
+                            common.getOrDefault("host." + host + ".compareSkipBody", common.getOrDefault("compareSkipBody", ""))));
             if (!path.matches("(?i)^https?://.*") && base.isBlank()) throw new IllegalArgumentException("unknown host: " + host);
             String url = path.matches("(?i)^https?://.*") ? path : base.replaceAll("/+$", "") + "/" + path.replaceAll("^/+", "");
             URI uri = URI.create(scripts.validateTemplate(url));
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null)
                 throw new IllegalArgumentException("invalid HTTP URL: " + url);
             Map<String, String> headers = new LinkedHashMap<>();
-            String headerText = row.getOrDefault("headers", "{}");
+            String headerText = referencedText(row.getOrDefault("headers", "{}"), scenarioDirectory, "headers");
             if (!headerText.isBlank()) {
                 var headerNode = json.readTree(headerText);
                 if (headerNode == null || !headerNode.isObject()) throw new IllegalArgumentException("headers must be a JSON object");
@@ -126,7 +132,7 @@ public final class ScenarioRunPlanReader {
                     var field = fields.next();
                     if (!field.getValue().isTextual()) throw new IllegalArgumentException("header values must be strings");
                     String key = field.getKey();
-                    String value = field.getValue().asText();
+                    String value = referencedText(field.getValue().asText(), scenarioDirectory, "header " + key);
                     scripts.validateTemplate(value);
                     if (!key.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")
                             || value.chars().anyMatch(character -> (character < 32 && character != '\t') || character == 127))
@@ -134,7 +140,7 @@ public final class ScenarioRunPlanReader {
                     headers.put(key, value);
                 }
             }
-            String body = row.getOrDefault("body", "");
+            String body = referencedText(row.getOrDefault("body", ""), scenarioDirectory, "body");
             scripts.validateTemplate(body);
             if (method.equals("HEAD") && !body.isEmpty()) throw new IllegalArgumentException("HEAD request body is not supported");
             long connect = positiveInt(common.getOrDefault("host." + host + ".connectTimeoutMs", "3000"), "connectTimeoutMs");
@@ -147,9 +153,22 @@ public final class ScenarioRunPlanReader {
             if (statusMin > statusMax) throw new IllegalArgumentException("invalid status range: " + status);
             String expectedMax = row.getOrDefault("expectedMaxMs", "");
             return new ScenarioRunPlan.Step(order, name, new CurlRequest(method, url, headers, body, connect, read),
-                    statusMin, statusMax, expectedMax.isBlank() ? null : nonNegative(expectedMax, "expectedMaxMs"), scriptIds);
+                    statusMin, statusMax, expectedMax.isBlank() ? null : nonNegative(expectedMax, "expectedMaxMs"), scriptIds, reference);
         } catch (IOException | IllegalArgumentException exception) {
             throw new IllegalArgumentException("scenario '" + name + "': " + exception.getMessage(), exception);
+        }
+    }
+
+    private static String referencedText(String value, Path scenarioDirectory, String label) throws IOException {
+        if (!value.startsWith("ref:")) return value;
+        String filename = value.substring(4).strip();
+        if (filename.isEmpty()) throw new IllegalArgumentException(label + " reference path must not be blank");
+        Path file = scenarioDirectory.resolve(filename).normalize();
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            throw new IOException("Unable to read " + label + " reference file: " + file + " ("
+                    + exception.getClass().getSimpleName() + ")", exception);
         }
     }
 

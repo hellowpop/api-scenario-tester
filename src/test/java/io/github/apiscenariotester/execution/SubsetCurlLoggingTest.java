@@ -53,15 +53,15 @@ class SubsetCurlLoggingTest {
             var sheet = workbook.getSheet("calls"); assertThat(sheet.getLastRowNum()).isEqualTo(10);
             var paths = new ArrayList<Path>();
             for (int index=1; index<=10; index++) {
-                var row = sheet.getRow(index); var link = row.getCell(10).getHyperlink();
+                var row = sheet.getRow(index); var link = row.getCell(11).getHyperlink();
                 assertThat(link).isNotNull(); assertThat(link.getType()).isEqualTo(HyperlinkType.FILE);
                 assertThat(link.getAddress()).matches("curl/[0-9a-f-]{36}\\.txt");
                 Path log = directory.resolve(link.getAddress()); paths.add(log);
                 UUID.fromString(log.getFileName().toString().replace(".txt",""));
                 String text = Files.readString(log);
                 assertThat(text).contains("COMMAND (argument array)","STDIN (UTF-8)","STDOUT","STDERR","RESPONSE HEADERS","RESPONSE BODY (UTF-8)");
-                assertThat(text).contains(row.getCell(4).getStringCellValue(),"X-test: subset");
-                String name = row.getCell(2).getStringCellValue();
+                assertThat(text).contains(row.getCell(5).getStringCellValue(),"X-test: subset");
+                String name = row.getCell(3).getStringCellValue();
                 if (!name.equals("main")) assertThat(text).contains("STDIN (UTF-8)\n"+name, "응답:"+name);
             }
             assertThat(paths).doesNotHaveDuplicates();
@@ -81,8 +81,8 @@ class SubsetCurlLoggingTest {
             try (var workbook = new XSSFWorkbook(output.toFile())) {
                 var sheet = workbook.getSheet("calls"); assertThat(sheet.getLastRowNum()).isEqualTo(1);
                 var result = sheet.getRow(1);
-                assertThat(result.getCell(9).getStringCellValue()).contains(postFailure ? "broken" : "received 500");
-                var link = result.getCell(10).getHyperlink(); assertThat(link).isNotNull();
+                assertThat(result.getCell(10).getStringCellValue()).contains(postFailure ? "broken" : "received 500");
+                var link = result.getCell(11).getHyperlink(); assertThat(link).isNotNull();
                 assertThat(Files.readString(directory.resolve(link.getAddress()))).contains("failure-body","응답:failure-body","RESPONSE HEADERS");
             }
         }
@@ -96,7 +96,7 @@ class SubsetCurlLoggingTest {
         assertThat(directory.resolve("curl")).doesNotExist();
         try (var workbook = new XSSFWorkbook(output.toFile())) {
             var sheet = workbook.getSheet("calls");
-            for (int index=1; index<=3; index++) assertThat(sheet.getRow(index).getCell(10).getHyperlink()).isNull();
+            for (int index=1; index<=3; index++) assertThat(sheet.getRow(index).getCell(11).getHyperlink()).isNull();
         }
     }
 

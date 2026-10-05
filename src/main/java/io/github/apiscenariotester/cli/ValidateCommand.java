@@ -18,7 +18,7 @@ public final class ValidateCommand implements Callable<Integer> {
     @Override public Integer call() {
         try {
             var plan = new ScenarioRunPlanReader().read(scenario, config);
-            spec.commandLine().getOut().printf("Valid scenario: %d sequential step(s), %d iteration(s)%n", plan.steps().size(), plan.iterations());
+            spec.commandLine().getOut().printf("Valid scenario: %d sequential step(s), %d iteration(s) per session, %d session(s)%n", plan.steps().size(), plan.iterations(), plan.sessions());
             return 0;
         } catch (IOException | RuntimeException exception) {
             spec.commandLine().getErr().println("Invalid scenario: " + exception.getMessage());

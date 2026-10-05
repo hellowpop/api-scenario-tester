@@ -37,7 +37,7 @@ public final class CurlHttpClient implements AutoCloseable {
         Path trace = workspace.resolve(id + ".trace");
         Path logFile = logDirectory == null ? null : logDirectory.resolve(id + ".txt");
         Files.writeString(stdin, request.body(), StandardCharsets.UTF_8);
-        List<String> args = new ArrayList<>(List.of(executable, "--disable", "--silent", "--show-error",
+        List<String> args = new ArrayList<>(List.of(executable, "--disable", "--insecure", "--silent", "--show-error",
                 "--globoff", "--proto", "=http,https", "--connect-timeout", seconds(request.connectTimeoutMs()),
                 "--max-time", seconds(request.connectTimeoutMs() + request.readTimeoutMs()),
                 "--cookie", cookies.toString(), "--cookie-jar", cookies.toString(),

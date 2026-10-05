@@ -81,7 +81,7 @@ class RunCommandTest {
             assertThat(address).matches("curl/[0-9a-f-]{36}\\.txt");
             UUID.fromString(address.substring(5, address.length() - 4));
             String log = Files.readString(output.getParent().resolve(address));
-            assertThat(log).contains("COMMAND", "STDIN", "STDOUT", "STDERR", "TRACE", "EXIT CODE: 0", body,
+            assertThat(log).contains("COMMAND", "--insecure", "STDIN", "STDOUT", "STDERR", "TRACE", "EXIT CODE: 0", body,
                     "응답: " + body, "=> Send header", "<= Recv header");
             assertThat(cell(workbook, row, "status").getNumericCellValue()).isEqualTo(200);
             assertThat(cell(workbook, row, "success").getBooleanCellValue()).isTrue();
@@ -198,9 +198,11 @@ class RunCommandTest {
     }
 
     @Test
-    void rejectsParallelSessionsAndInvalidScriptsBeforeCallingApi() throws Exception {
-        Path parallel = writeScenario(Map.of("host.api.baseUrl", baseUrl, "sessions", "2"), List.of(), List.of(row("1", "GET", "/health", "")));
-        assertThat(run(parallel, directory.resolve("parallel.xlsx"))).isEqualTo(2);
+    void rejectsInvalidSessionCountsAndScriptsBeforeCallingApi() throws Exception {
+        for (String sessions : List.of("0", "-1", "invalid")) {
+            Path invalid = writeScenario(Map.of("host.api.baseUrl", baseUrl, "sessions", sessions), List.of(), List.of(row("1", "GET", "/health", "")));
+            assertThat(run(invalid, directory.resolve("invalid.xlsx"))).isEqualTo(2);
+        }
         Path scripted = writeScenario(Map.of("host.api.baseUrl", baseUrl), List.of(Map.of("id", "pre", "phase", "PRE", "body", "if (")), List.of(row("1", "GET", "/health", "")));
         assertThat(run(scripted, directory.resolve("scripted.xlsx"))).isEqualTo(2);
         assertThat(requests).isEmpty();
@@ -208,7 +210,7 @@ class RunCommandTest {
 
     @Test void invalidScenarioDoesNotRenameExistingResult() throws Exception {
         Path output = directory.resolve("keep.xlsx"); Files.writeString(output,"keep result");
-        Path input = writeScenario(Map.of("host.api.baseUrl",baseUrl,"sessions","2"),List.of(),List.of(row("1","GET","/health","")));
+        Path input = writeScenario(Map.of("host.api.baseUrl",baseUrl,"sessions","0"),List.of(),List.of(row("1","GET","/health","")));
         assertThat(run(input,output)).isEqualTo(2); assertThat(requests).isEmpty();
         assertThat(Files.readString(output)).isEqualTo("keep result");
         try (var files = Files.list(directory)) { assertThat(files.noneMatch(file -> file.getFileName().toString().matches("keep_[0-9]{8}_[0-9]{6}_[0-9]{3}(?:_[0-9]+)?\\.xlsx"))).isTrue(); }
@@ -230,6 +232,42 @@ class RunCommandTest {
         assertThat(new RootCommand().execute(console, "validate", "--scenario", scenario.toString())).isZero();
         assertThat(requests).isEmpty();
         assertThat(new RootCommand().execute(console, "run")).isEqualTo(2);
+    }
+
+    @Test void referencedHeadersAndBodyUseScenarioDirectoryAndRenderFileContents() throws Exception {
+        Path payloads = Files.createDirectories(directory.resolve("파일 폴더"));
+        Files.writeString(payloads.resolve("headers.json"), "{\"X-Empty\":\"ref:파일 폴더/header.txt\"}");
+        Files.writeString(payloads.resolve("header.txt"), "session-${scenario.session}");
+        String body = "{\"name\":\"한글\",\"session\":${scenario.session}}\r\n\r\n";
+        Path bodyFile = payloads.resolve("body.txt"); Files.writeString(bodyFile, body);
+        var subset = new LinkedHashMap<>(row("1", "POST", "/echo", "ref:" + bodyFile.toAbsolutePath()));
+        subset.put("subsetId", "send"); subset.put("headers", "ref:파일 폴더/headers.json");
+        var main = new LinkedHashMap<>(row("2", "POST", "/echo", "ref:파일 폴더/body.txt"));
+        main.put("headers", "ref:파일 폴더/headers.json");
+        Path input = directory.resolve("referenced.yml");
+        new ScenarioYamlCodec().write(new ScenarioDocument(1, Map.of("host.api.baseUrl", baseUrl), Map.of(), List.of(),
+                List.of(subset), List.of(Map.of("order", "1", "name", "send", "method", "SUBSET", "path", "send"), main)), input);
+        assertThat(new RootCommand().execute(console, "validate", "--scenario", input.toString())).as(console.toString()).isZero();
+        assertThat(requests).isEmpty();
+        assertThat(run(input, directory.resolve("referenced.xlsx"), "--debug")).as(console.toString()).isZero();
+        assertThat(requests).hasSize(2).allSatisfy(request -> assertThat(request)
+                .contains(body.replace("${scenario.session}", "1"), "empty=session-1"));
+    }
+
+    @Test void invalidReferencesAreRejectedBeforeHttpOrOutputRenaming() throws Exception {
+        Files.writeString(directory.resolve("bad-headers.json"), "[]");
+        Path output = directory.resolve("reference-error.xlsx"); Files.writeString(output, "keep");
+        for (var entry : List.of(Map.entry("body", "ref:missing.txt"), Map.entry("headers", "ref:missing.json"),
+                Map.entry("body", "ref: "), Map.entry("body", "ref:" + directory.toAbsolutePath()),
+                Map.entry("headers", "ref:bad-headers.json"))) {
+            var invalid = new LinkedHashMap<>(row("2", "POST", "/echo", "")); invalid.put(entry.getKey(), entry.getValue());
+            Path input = scenario(List.of(row("1", "GET", "/health", ""), invalid), false);
+            assertThat(new RootCommand().execute(console, "validate", "--scenario", input.toString())).isEqualTo(2);
+            assertThat(run(input, output)).isEqualTo(2);
+            assertThat(Files.readString(output)).isEqualTo("keep");
+            assertThat(requests).isEmpty();
+        }
+        assertThat(console.toString()).contains("scenario 'call-2'", "reference file:", "missing.txt");
     }
 
     @Test

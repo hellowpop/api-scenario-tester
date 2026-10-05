@@ -16,7 +16,7 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
-@Command(name = "run", description = "Runs sequential API calls using curl and writes an Excel report.", mixinStandardHelpOptions = true)
+@Command(name = "run", description = "Runs parallel sessions of sequential curl API calls and writes an Excel report.", mixinStandardHelpOptions = true)
 public final class RunCommand implements Callable<Integer> {
     @Option(names = "--scenario", required = true, description = "Version 1 scenario YAML") private Path scenario;
     @Option(names = "--config", description = "Optional runtime YAML") private Path config;

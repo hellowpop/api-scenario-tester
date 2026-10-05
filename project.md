@@ -5,20 +5,21 @@
 - 문서 상태: 설계 승인본
 - 기준일: 2026-09-18
 - 구현 현황 분석일: 2026-10-05 (17절 참조)
+- 최신 실행 계약: 28절의 병렬 세션, 29절의 결과 컬럼 순서, 30절의 요청 파일 참조, 31절의 referenceUrl 응답 비교, 32~37절의 TLS·응답 저장·비교 정규화·제외 규칙. 17~27절은 변경 당시의 이력이다.
 - 산출물: Spring Boot 기반 executable JAR
 - 주 입력: YAML 시나리오와 YAML 런타임 설정
 - 주 출력: Excel 실행 결과 및 선택적 curl debug 로그 (YAML 보고서는 후속 기능)
 
 ## 2. 목적
 
-API Scenario Tester는 Excel에 정의된 REST API 호출을 지정한 순서대로 실행하는 CLI 프로그램이다. 하나의 실행 컨텍스트에서 시나리오를 순차 호출하며 병렬 실행은 지원하지 않는다. 전처리, 응답 필터링, 검증, 후처리는 Apache Commons JEXL 스크립트로 확장한다.
+API Scenario Tester는 Excel에 정의된 REST API 호출을 지정한 순서대로 실행하는 CLI 프로그램이다. `sessions`개의 독립 세션을 병렬 실행하고 각 세션 안에서 시나리오를 순차 호출한다. 전처리, 응답 필터링, 검증, 후처리는 Apache Commons JEXL 스크립트로 확장한다.
 
 다음 기능을 제공한다.
 
 - Excel 시나리오 템플릿 생성
 - YAML 시나리오 파싱 및 사전 검증
 - Excel과 YAML 시나리오의 양방향 변환
-- 단일 실행 컨텍스트의 순차 호출과 반복 실행
+- 독립 세션 병렬 실행 및 세션 안의 순차 호출과 반복 실행
 - 고정 또는 범위 내 무작위 호출 대기
 - JEXL 기반 전처리, 필터, 검증, 후처리
 - 현재 실행의 협력적 중단
@@ -41,7 +42,7 @@ API Scenario Tester는 Excel에 정의된 REST API 호출을 지정한 순서대
 ### 3.2 제외 범위
 
 - GUI
-- 다중 세션 및 HTTP 호출의 병렬 실행
+- 같은 세션 안에서의 HTTP 호출 병렬 실행
 - 분산 부하 생성
 - WebSocket, gRPC, SOAP 전용 기능
 - Postman의 JavaScript 런타임 호환 실행
@@ -78,7 +79,7 @@ java -jar api-scenario-tester.jar convert yaml --input scenario.yml --output sce
 
 - `template`: 유효한 빈 Excel 템플릿을 생성한다.
 - `validate`: 외부 호출 없이 Excel과 YAML의 구조 및 참조 관계를 검증한다.
-- `run`: 검증 후 curl로 시나리오를 순차 실행하고 결과 Excel을 생성한다. `--debug` 시 curl 입력·출력 로그와 파일 하이퍼링크를 추가한다.
+- `run`: 검증 후 세션별 curl 시나리오를 병렬 실행하고 결과 Excel을 생성한다. 세션 안의 호출은 순차 실행하며 `--debug` 시 curl 입력·출력 로그와 파일 하이퍼링크를 추가한다.
 - `convert postman`: Postman Collection을 Excel 형식으로 변환한다.
 - `convert jmeter`: JMeter JMX를 Excel 형식으로 변환한다.
 - `convert excel`: Excel 시나리오를 실행 기준 YAML로 변환한다.
@@ -142,14 +143,14 @@ Excel은 시나리오 작성·검토·외부 도구 변환을 위한 교환 형�
 
 | key | value | 필수 | 설명 |
 |---|---|---:|---|
-| `sessions` | 정수 | 아니오 | 기존 파일 호환용. 생략 또는 `1`만 허용하며 병렬 실행을 의미하지 않음 |
+| `sessions` | 양의 정수 | 아니오 | 병렬 세션 수, 기본값 `1` |
 | `iterations` | 정수 | 예 | 메인 시나리오 반복 횟수, 1 이상 |
 | `waitPattern` | `FIXED` 또는 `RANDOM_RANGE` | 예 | API 호출 사이 대기 방식 |
 | `waitMinMs` | 0 이상 정수 | 예 | 고정 대기 또는 범위 최솟값 |
 | `waitMaxMs` | 0 이상 정수 | 예 | 범위 최댓값 |
 | `continueOnFailure` | boolean | 예 | 호출 실패 후 다음 행 진행 여부 |
 
-호스트는 `host.<name>.baseUrl`, `host.<name>.connectTimeoutMs`, `host.<name>.readTimeoutMs` 키로 정의할 수 있다.
+호스트는 `host.<name>.baseUrl`, 선택적 `host.<name>.referenceUrl`, `host.<name>.connectTimeoutMs`, `host.<name>.readTimeoutMs` 키로 정의할 수 있다. 런타임 `hosts.<name>` 설정이 같은 키를 덮어쓴다.
 
 #### `result_format`
 
@@ -221,8 +222,8 @@ input
  ├─ YAML 읽기
  └─ 입력 검증 및 실행 모델 조립
 execution
- ├─ 단일 실행 컨텍스트
- ├─ 시나리오 순차 실행
+ ├─ 세션별 독립 실행 컨텍스트
+ ├─ 세션 병렬 실행 및 세션 안의 순차 호출
  ├─ 대기 정책
  └─ 중단 상태 관리
 http
@@ -251,14 +252,14 @@ domain
 3. 환경 변수를 치환한다.
 4. 값 범위, 중복 ID, 참조 무결성, 스크립트 phase를 검증한다.
 5. JEXL 스크립트를 미리 컴파일하여 문법 오류를 검출한다.
-6. 단일 executor 컨텍스트와 쿠키 저장소를 만든다.
-7. 설정된 iteration 횟수만큼 메인 시나리오를 반복한다.
+6. 각 세션의 독립 global/executor 컨텍스트와 쿠키 저장소를 만든다.
+7. 세션을 병렬 실행하며 세션마다 설정된 iteration 횟수만큼 메인 시나리오를 반복한다.
 8. 각 메인 행에서 subset, 전처리, HTTP 호출, 필터, 검증, 후처리를 순서대로 수행한다.
 9. 호출 사이에 지정한 대기 정책을 적용한다.
 10. 결과를 모아 통계를 계산하고 Excel 파일을 원자적으로 저장한다. debug 시 호출별 curl 로그 링크를 포함한다.
 11. 실패 유무에 따라 프로세스 종료 코드를 결정한다.
 
-모든 호출은 순차적으로 실행한다. subset과 main 호출은 동일 실행 컨텍스트와 쿠키 저장소를 사용한다. 런타임 설정 원본과 구분되는 실행용 `global` Map에 토큰·사용자 ID를 저장하거나 삭제할 수 있도록 설계한다. 병렬 실행을 위한 스레드 풀은 구성하지 않는다.
+각 세션의 호출은 순차적으로 실행한다. 같은 세션의 subset과 main 호출은 실행 컨텍스트와 쿠키 저장소를 공유하며 서로 다른 세션은 격리한다. 런타임 설정 원본과 구분되는 실행용 `global` Map에 토큰·사용자 ID를 저장하거나 삭제한다. Java 21 virtual thread로 세션을 병렬 실행한다.
 
 ## 9. JEXL 실행 환경
 
@@ -307,7 +308,7 @@ JEXL 3.7의 `SECURE` 권한을 사용하고 `ExecutionControl`의 중단 메서�
 - JEXL 컴파일 오류
 - 순환 subset 참조
 - 정의되지 않은 환경 변수
-- `sessions`가 `1`이 아닌 병렬 실행 설정
+- 양의 정수가 아닌 `sessions` 설정
 
 Excel 관련 오류는 시트명, 행, 컬럼을 포함한다.
 
@@ -380,7 +381,7 @@ warnings: []
 
 - Test Plan 탐색 순서의 HTTP Request Sampler를 main 행으로 변환한다.
 - HTTP Header Manager를 가장 가까운 sampler에 적용한다.
-- Thread Group의 loop count를 `iterations`로 변환한다. thread 수가 `1`이 아니면 병렬 실행을 지원하지 않는다는 경고를 기록하고 실행 설정은 단일 컨텍스트로 제한한다.
+- Thread Group의 loop count를 `iterations`, thread 수를 `sessions`로 변환한다.
 - Constant Timer는 `FIXED`, Uniform Random Timer는 가능한 경우 `RANDOM_RANGE`로 변환한다.
 - 복잡한 Controller, assertion, extractor, plugin 요소는 경고로 기록한다.
 
@@ -392,7 +393,7 @@ warnings: []
 - YAML 환경 변수 치환과 host 덮어쓰기 테스트
 - 참조 무결성 및 JEXL 사전 컴파일 테스트
 - 고정/무작위 대기 정책 테스트
-- 단일 실행 컨텍스트와 `sessions` 설정 제한 테스트
+- 병렬 세션의 동시 HTTP 호출, 컨텍스트·쿠키 격리 및 양의 정수 `sessions` 검증
 - subset과 main 실행 순서 테스트
 - `stop` 협력적 중단 테스트
 - MockWebServer를 이용한 쿠키, 헤더, 본문, 상태, timeout 통합 테스트
@@ -695,3 +696,87 @@ SUBSET 지정 행 자체와 curl 실행 전 PRE 실패·중단에는 실제 HTTP
 
 CLI 회귀 테스트는 Excel → YAML → Excel 왕복에서 여러 줄 스크립트, 빈 줄, JSON 들여쓰기, 끝 개행 0/1/2개의 동일성을 검사한다.
 `mvn package`: 71 tests, failures 0, errors 0, BUILD SUCCESS. `target/api-scenario-tester.jar`를 갱신했다.
+
+## 28. 병렬 세션 지원 (2026-10-05)
+
+사용자의 최신 요청에 따라 단일 세션 제한을 해제했다. `common.sessions`는 양의 정수이고 기본값은 1이다. `ScenarioRunPlan`에 sessions를 추가하고 `ScenarioRunner`가 Java 21 virtual thread로 각 세션의 전체 시나리오를 실행한다. 각 세션은 main/subset 순서와 iteration을 순차 처리한다. 계획과 컴파일한 JEXL은 공유하며 global/executor 변수, 호출별 ScriptContext/ExecutionControl 및 curl 쿠키 저장소는 세션마다 분리한다. 변수와 쿠키는 같은 세션의 iteration 간 유지한다. `scenario.session`은 1부터 시작한다.
+
+HTTP·스크립트 실패의 continueOnFailure 정책과 control.stop은 해당 세션에 적용한다. 실행 스레드 중단 또는 worker 파일 처리 오류에서는 outstanding worker를 모두 interrupt하고 종료를 기다린다. CurlHttpClient는 중단된 프로세스를 강제 종료하고 debug 로그를 기록한 뒤 임시 파일을 정리한다. HTTP 요청이 없으면 worker를 만들지 않는다.
+
+`CallResult`에 session을 추가하고 결과를 세션 번호 순으로 안정 정렬하여 각 세션의 반복·호출 순서를 유지한다. Excel calls 시트 끝에 session 컬럼을 추가해 기존 컬럼 위치와 curlLog 링크를 유지한다. summary.sessions는 설정한 세션 수이며 호출 수와 통계는 모든 세션을 합산한다. UUID curl 로그 파일은 모든 세션에서 같은 폴더에 저장한다. validate 출력과 CLI 도움말, README 및 현재 기술 명세를 갱신했다. JMeter의 기존 thread 수 → sessions 변환도 실행에 사용할 수 있다.
+
+실제 curl과 두 요청의 barrier로 동시 실행을 확인했다. 두 세션·두 iteration의 subset 로그인과 main 호출에서 토큰/쿠키 격리, 결과 8행·로그 8개·링크, 세션 정렬을 검증했다. continueOnFailure 두 정책과 세션별 control.stop, 두 활성 curl worker의 실행 취소·중단 로그·정리 완료를 테스트했다. 코드 리뷰에서 중요한 결함은 발견되지 않았다. Maven package: 74 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 29. 결과 session 컬럼 우선 배치 (2026-10-05)
+
+사용자 요청에 따라 결과 Excel의 calls 시트 컬럼 순서를 session, iteration, order, name, method, url, status, curlExitCode, elapsedMs, success, error, curlLog로 변경했다. session이 첫 번째 컬럼이며 데이터 셀, 시간 서식, curl 로그 하이퍼링크 위치를 함께 이동했다. 병렬 세션 테스트에서 첫 컬럼 위치를 검증하고 subset/JEXL 보고서 검증의 컬럼 위치도 수정했다.
+
+## 30. 요청 헤더·본문 파일 참조 (2026-10-05)
+
+ScenarioRunPlanReader가 main/subset HTTP 행의 headers와 body를 해석하기 전에 ref: 접두사를 확인한다. 이후 경로의 UTF-8 파일 내용을 읽으며, 상대 경로는 실행할 시나리오 YAML의 부모 폴더를 기준으로 하고 절대 경로도 허용한다. headers 전체 파일은 기존 JSON 객체 형식이다. 객체 안의 개별 헤더 값도 ref: 파일을 읽을 수 있다. 파일 내용은 재귀 참조하지 않는다. 본문의 CRLF, 빈 줄, 앞뒤 공백을 그대로 보존하고 파일 내용의 JEXL 템플릿은 기존 경로로 사전 검증·호출 시 치환한다. 헤더는 참조 후 기존 문자열·제어문자 검증을 적용한다.
+
+빈 참조 경로, 없는 파일, 디렉터리, 잘못된 UTF-8, 잘못된 헤더 JSON은 실행 계획 생성 단계에서 오류가 된다. 읽기 오류는 시나리오 이름, headers/body 또는 개별 헤더명과 절대 파일 경로·예외 종류를 포함한다. 모든 참조를 호출 전에 읽으므로 파일 오류 시 API 호출과 기존 결과 보관을 시작하지 않는다. 내용은 실행 계획의 스냅샷으로 사용하며 각 병렬 세션은 자신의 컨텍스트로 템플릿을 치환한다. Excel/YAML 변환 단계에서는 ref: 원문을 보존한다.
+
+실제 curl 테스트로 한글·공백 상대 경로와 절대 경로, main/subset, 헤더 전체 및 개별 값 파일, CRLF 본문과 scenario.session 치환을 검증했다. validate는 HTTP를 호출하지 않으며 이후 행의 참조 오류도 요청 0건·기존 결과 보존으로 처리함을 확인한다.
+Maven package: 76 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 31. referenceUrl 응답 비교 (2026-10-05)
+
+host.api.referenceUrl 또는 런타임 hosts.api.referenceUrl이 설정된 HTTP 행에 기준 서버 호출을 추가했다. execution.ReferenceTarget이 base/reference URL을 사전 검증하고 PRE 및 JEXL 치환 후의 요청 경로를 기준 URL에 매핑한다. base의 경로 prefix를 reference prefix로 치환하며 encoded query와 빈 suffix·끝 slash를 보존한다. 두 URL은 query/fragment 없는 절대 HTTP(S) 주소여야 한다. absolute 요청이나 PRE로 prefix 밖의 경로를 지정하면 그 경로를 reference prefix에 붙인다.
+
+세션별 reference CurlHttpClient를 별도로 소유하여 base/reference 쿠키를 격리한다. base curl 다음 reference curl을 동일 메서드·렌더링된 헤더·본문·timeout으로 실행하고 base FILTER/VALIDATE/POST 스크립트를 수행한다. reference 응답은 스크립트 전역변수를 수정하지 않는다. ref: 파일 내용, subset 및 병렬 세션에도 동일 적용한다. PRE 실패/stop은 두 호출 모두 생략한다. 실제 양쪽 호출에 UUID debug 로그를 기록한다.
+
+http.ResponseHeaders를 추가하여 JEXL과 비교에 최종 HTTP 응답 블록 파서를 공유한다. 상태행을 제외하고 헤더명을 소문자로 정규화하며 Map 순서를 무시한다. 반복 헤더 값 순서는 유지하고 Date 등 모든 헤더 값과 UTF-8 본문 원문의 공백·개행을 비교한다. execution.ReferenceComparison은 상태·헤더·본문 match flag와 다른 헤더명, 본문 최초 차이의 0-based UTF-16 위치·길이를 요약한다. 네트워크/curl 오류 또는 reference 런타임 URL 치환 오류는 comparison 실패로 기록한다. base success와 실패 중단 정책, base 응답 스크립트 실행은 유지한다. worker 파일 처리 오류와 실행 취소는 기존 전체 취소·자원 정리를 적용한다.
+
+CallResult에 선택적 comparison을 추가하고 Excel calls 끝에 referenceUrl, referenceStatus, referenceCurlExitCode, referenceElapsedMs, statusMatch, headersMatch, responseMatch, comparisonMatch, comparisonDetail, referenceCurlLog를 추가했다. reference가 없거나 PRE가 중단된 행은 이 컬럼을 비운다. summary.referenceCalls는 실제 기준 curl 시도 수이며 comparisonMatched/comparisonUnmatched는 URL 치환 오류를 포함한 비교 결과 건수다. totalCalls와 응답시간 통계는 base 호출만 집계한다. session은 첫 컬럼을 유지한다.
+
+두 실제 HTTP 서버와 curl로 runtime host override, prefix/query, ref: 본문, subset/main 및 병렬 세션의 독립 쿠키·base 토큰, status/header/body 불일치 및 두 로그 링크를 검증했다. 연결 실패, invalid reference 사전 오류·기존 결과 보존, PRE stop, 생략된 reference, 정규화 일치·반복 값 순서·본문 공백 차이, PRE 요청 변경을 확인했다. 코드 리뷰의 reference 치환 오류가 base 호출을 막는 문제와 exact prefix에 slash를 추가하는 문제를 수정하고 회귀 테스트를 추가했다. 재검토에서 중요한 잔여 결함은 없었다. Maven package: 84 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 32. curl 인증서 검증 비활성화 (2026-10-05)
+
+사용자 요청에 따라 CurlHttpClient의 명령 인자에 --insecure를 추가했다. 모든 HTTPS 호출에서 서버 인증서 신뢰와 호스트명 검증을 비활성화한다. 공통 클라이언트를 사용하는 main/subset 및 referenceUrl 호출에 동일 적용하며 debug COMMAND에도 해당 인자를 기록한다. 기존 curl 로그 및 양쪽 서버 비교 테스트에서 실제 실행 명령의 옵션을 확인하도록 검증을 갱신했다.
+
+## 33. reference 비교 HTTP/HTTPS 차이 무시 (2026-10-05)
+
+ReferenceComparison에서 헤더 값과 본문 비교용 문자열의 http:// 및 https:// scheme을 대소문자 구분 없이 http://로 정규화한다. 실제 호출 URL과 CurlResponse, JEXL response, debug 로그는 변경하지 않는다. 헤더 차이 이름과 본문 차이 위치/길이도 정규화한 값을 기준으로 계산하여 scheme 차이만 있을 때 matched를 기록한다. 상태 코드, 호스트·포트·경로·쿼리, 헤더 반복 값 순서, 본문 공백·개행 차이는 기존대로 비교한다.
+
+Location 및 여러 Link 값, JSON 본문의 복수 URL에서 scheme만 바뀐 응답이 일치함을 검증하고 경로 차이는 불일치로 남으며 응답 원문과 reference URL이 보존됨을 확인했다.
+Maven package: 85 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 34. 수신 헤더·본문 컬럼 및 큰 응답 파일 (2026-10-05)
+
+ExecutionExcelWriter의 calls 끝에 responseHeaders, responseBody, referenceResponseHeaders, referenceResponseBody를 추가했다. CurlResponse의 수신 원문을 그대로 기록하며 reference 호출이 없으면 reference 컬럼을 비운다. 비교용 scheme 정규화는 이 원문에 적용하지 않는다. debug 사용 여부와 무관하게 각 값의 Unicode code point 수가 4096 이하면 셀에 원문과 wrap text 서식을 적용한다. 4096을 초과하면 결과 Excel의 부모/big 아래 UUID.txt를 CREATE_NEW로 예약하여 UTF-8 원문을 저장하고 같은 셀에 big/UUID.txt 상대 FILE 링크를 생성한다. 값별로 파일을 분리하며 개행·공백과 32767자를 넘는 본문도 잘라내지 않는다.
+
+보고서 생성 중 IOException/RuntimeException이 발생하면 이번 writer가 생성한 큰 응답 파일만 정리하고 기존 보고서의 파일은 보존한다. 큰 값이 없으면 big 폴더를 만들지 않는다. 실행기는 최종 결과와 같은 폴더의 임시 workbook을 사용하므로 최종 이동 후에도 링크가 유지된다.
+
+새 report.ExecutionExcelWriterTest로 정확히 4096개 emoji의 inline 경계, 4097자 헤더 및 4만자 한글/CRLF 본문 파일, base/reference 네 컬럼의 상대 링크와 UTF-8 원문, 동일 폴더의 반복 보고서 생성에서 UUID 파일 보존, 빈 응답 및 reference 미설정을 검증했다. 문서와 현재 결과 계약을 갱신했다.
+Maven package: 88 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 35. JSON 응답 pretty 저장 (2026-10-05)
+
+report.ResponseBodyFormatter를 추가하고 ExecutionExcelWriter에서 base/reference 수신 본문을 저장하기 전에 단일 JSON 문서인지 검사하여 2칸 들여쓰기와 LF 개행을 적용한다. 객체·배열과 scalar를 지원하며 중첩 배열도 줄바꿈한다. Streaming parser/generator를 사용해 숫자의 원래 문자열 정밀도와 중복 필드를 보존한다. 잘못된 JSON, 비JSON, JSON 뒤의 추가 데이터·복수 root, 빈 본문은 원문을 유지한다.
+
+pretty 변환 후 Unicode code point 수를 계산해 4096자 이하이면 셀, 초과이면 big/UUID.txt UTF-8 파일과 링크로 저장한다. 수신 헤더는 형식을 변경하지 않는다. CurlResponse 원문·JEXL response·reference 비교·curl debug 로그는 기존 원문을 사용한다.
+
+테스트는 base/reference의 중첩 JSON 셀, 한글·고정밀 소수·중복 필드 보존, compact JSON이 pretty 후 4096자를 넘을 때 파일로 저장하는 경계, 비JSON·불완전 JSON·trailing content·복수 root의 원문 보존을 검증한다.
+Maven package: 91 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 36. pretty JSON 응답 비교 (2026-10-05)
+
+ResponseBodyFormatter를 report에서 http 패키지로 이동해 저장과 비교에서 같은 public pretty 함수를 사용한다. ReferenceComparison은 base/reference 본문을 pretty 변환한 후 기존 HTTP/HTTPS scheme 정규화를 적용하여 비교한다. 따라서 JSON 들여쓰기·개행·escape 표현 차이만 있으면 responseMatch가 true이며 필드/배열 순서, 숫자의 문자열 표현, 문자열 값 내부 공백과 실제 값 차이는 유지한다. 비JSON 및 잘못된 JSON은 formatter의 원문 반환 정책에 따라 기존 비교를 유지한다. 헤더 비교와 상태 판정은 변경하지 않는다.
+
+비교 요약의 본문 차이 위치·길이는 pretty+scheme 정규화한 문자열을 기준으로 한다. 보고서 JSON 본문은 같은 pretty 함수를 사용하지만 HTTP/HTTPS 정규화는 비교에만 적용한다. CurlResponse와 JEXL response, curl 로그는 원문을 유지한다.
+
+회귀 테스트로 서로 다른 들여쓰기·CRLF/LF·끝 공백, JSON escaped slash 및 HTTP/HTTPS 차이가 있는 동등 본문의 일치, 실제 문자열 값 차이의 불일치, 비JSON 개행 차이 유지와 원문 응답 보존을 확인했다. 기존 공백 차이 테스트는 pretty 비교 기대값으로 갱신했다.
+Maven clean package: 92 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.
+
+## 37. 헤더·JSONPath 본문 비교 제외 (2026-10-05)
+
+execution.ComparisonRules를 추가하고 ReferenceTarget에 불변 규칙을 포함한다. ScenarioRunPlanReader가 compareSkipHeader/compareSkipBody를 개행 단위로 분리하여 사전 컴파일하고, ScenarioRunner가 base/reference 비교에 전달한다. common의 동일 이름 키를 기본값으로 사용하고 host.<name> 설정, 런타임 hosts.<name> 순서로 덮어쓴다. 빈 host 설정은 기본 규칙을 해제한다. referenceUrl이 있는 HTTP 호출에만 적용하며 main/subset과 병렬 세션에서 같은 규칙을 사용한다.
+
+compareSkipHeader는 대소문자를 무시한 헤더명 목록이며 최종 응답 헤더에서 비교용으로 제외한다. compareSkipBody는 Jayway JSONPath 2.10.0으로 해석하며 pom.xml에 Spring Boot 버전 관리 의존성을 추가했다. 빈 줄과 존재하지 않는 경로는 무시한다. 필드·property union·배열 인덱스 및 음수 인덱스·wildcard·재귀 경로·필터를 지원하고 $는 JSON 본문 전체를 제외한다. 문법 오류는 curl 및 기존 결과 rename 전에 실패한다. 비JSON은 원문 비교를 유지하며 실행 중 JSONPath 선택 오류는 comparisonDetail에 기록하고 base 성공 판정과 응답 스크립트는 유지한다.
+
+본문을 읽은 트리는 선택에만 사용한다. 모든 대상 경로를 원본 기준으로 먼저 확정한 뒤 원본 JSON 토큰을 streaming 복사하면서 선택한 노드만 생략한다. 따라서 배열 삭제에 따른 인덱스 이동을 피하고, 제외하지 않은 중복 필드와 숫자 표기를 보존하며 따옴표·backslash가 포함된 JSON 키도 처리한다. 내부 경로는 속성명과 배열 인덱스 세그먼트로 구분하며 라이브러리 반환 경로가 여러 노드로 해석되면 비교 오류로 기록해 의도하지 않은 필드 삭제를 막는다. 비교는 제외 후 shared pretty formatter 및 HTTP/HTTPS 정규화를 적용한다. 결과 Excel·big 파일·curl 로그·JEXL 응답은 제외 전 전체 응답을 유지한다.
+
+회귀 검증은 여러 줄·CRLF·헤더 대소문자·공통/host/runtime 우선순위·빈 설정 해제, wildcard·재귀·필터·property union·음수 인덱스·동시 배열 삭제·부모/자식 겹침·존재하지 않는 경로·$·비JSON·잘못된 문법의 사전 실패를 포함한다. 실제 두 HTTP 서버와 병렬 세션에서 제외 후 비교 일치 및 원본 보고서 보존을 확인했다. 검토에서 발견한 특수문자 경로 재해석 오류와 중복 필드 소실은 streaming 복사로 수정하고 회귀 테스트를 추가했다.
+Maven package: 103 tests, failures 0, errors 0, BUILD SUCCESS. target/api-scenario-tester.jar를 갱신했다.

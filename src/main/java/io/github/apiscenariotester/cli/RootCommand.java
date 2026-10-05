@@ -8,7 +8,7 @@ import picocli.CommandLine.Command;
 
 @Command(
         name = "api-scenario-tester",
-        description = "Executes sequential YAML API scenarios using curl.",
+        description = "Executes YAML API scenarios in parallel sessions using curl.",
         mixinStandardHelpOptions = true,
         subcommands = {
             TemplateCommand.class,

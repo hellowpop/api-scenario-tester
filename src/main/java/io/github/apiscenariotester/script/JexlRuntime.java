@@ -141,12 +141,7 @@ public final class JexlRuntime {
             throw new IllegalArgumentException("invalid header: " + name);
     }
     public Map<String,Object> response(CurlResponse response) {
-        var headers = new LinkedHashMap<String,List<String>>();
-        for (String line : response.headers().split("\\r?\\n")) {
-            if (line.startsWith("HTTP/")) headers.clear();
-            int colon = line.indexOf(':');
-            if (colon > 0) headers.computeIfAbsent(line.substring(0,colon).trim().toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(line.substring(colon+1).trim());
-        }
+        var headers = io.github.apiscenariotester.http.ResponseHeaders.parse(response.headers());
         var result = new LinkedHashMap<String,Object>();
         result.put("status", response.status()); result.put("headers", freeze(headers)); result.put("body", response.body());
         result.put("elapsedMs", response.elapsedMs()); result.put("exitCode", response.exitCode());
