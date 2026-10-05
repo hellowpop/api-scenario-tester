@@ -2,13 +2,15 @@
 
 ## 1. 문서 정보
 
-- 문서 상태: 설계 승인본
-- 기준일: 2026-09-18
-- 구현 현황 분석일: 2026-10-05 (17절 참조)
+- 문서 상태: 현재 구현 명세 및 변경 이력
+- 최초 설계일: 2026-09-18
+- 최종 갱신일: 2026-10-05
+- 저장소: [hellowpop/api-scenario-tester](https://github.com/hellowpop/api-scenario-tester), 기본 작업 브랜치 `master`
+- 1~11절은 현재 실행 계약, 12절은 후속 YAML 보고서 설계, 17~37절은 구현 시점별 이력이다. 초기 분석의 미지원 표기는 이후 구현 이력으로 대체된다.
 - 최신 실행 계약: 28절의 병렬 세션, 29절의 결과 컬럼 순서, 30절의 요청 파일 참조, 31절의 referenceUrl 응답 비교, 32~37절의 TLS·응답 저장·비교 정규화·제외 규칙. 17~27절은 변경 당시의 이력이다.
 - 산출물: Spring Boot 기반 executable JAR
 - 주 입력: YAML 시나리오와 YAML 런타임 설정
-- 주 출력: Excel 실행 결과 및 선택적 curl debug 로그 (YAML 보고서는 후속 기능)
+- 주 출력: Excel 실행 결과, 4096자 초과 응답의 `big/<uuid>.txt`, 선택적 `curl/<uuid>.txt` debug 로그 (YAML 보고서는 후속 기능)
 
 ## 2. 목적
 
@@ -25,6 +27,9 @@ API Scenario Tester는 Excel에 정의된 REST API 호출을 지정한 순서대
 - 현재 실행의 협력적 중단
 - Postman Collection 및 JMeter JMX 가져오기
 - 응답시간과 성공률 통계를 포함한 Excel 결과 및 curl debug 로그 생성
+- 요청 헤더·본문의 `ref:` UTF-8 파일 참조
+- `referenceUrl` 응답 비교와 개행 헤더명·JSONPath 본문 제외 규칙
+- JSON pretty 저장·비교 및 큰 응답의 상대 파일 하이퍼링크
 
 ## 3. 범위
 
@@ -59,6 +64,7 @@ API Scenario Tester는 Excel에 정의된 REST API 호출을 지정한 순서대
 - Apache Commons JEXL 3.7.0
 - Apache POI 5.5.1
 - Jackson Dataformat YAML
+- Jayway JSONPath 2.10.0 (Spring Boot dependency management)
 - HTTP 호출은 외부 `curl` 명령으로 수행
 - Picocli 기반 명령행 인터페이스
 - JUnit 5, AssertJ, OkHttp MockWebServer
@@ -78,7 +84,7 @@ java -jar api-scenario-tester.jar convert yaml --input scenario.yml --output sce
 ```
 
 - `template`: 유효한 빈 Excel 템플릿을 생성한다.
-- `validate`: 외부 호출 없이 Excel과 YAML의 구조 및 참조 관계를 검증한다.
+- `validate`: 외부 호출 없이 실행 기준 YAML과 런타임 설정의 구조·참조·JEXL·비교 제외 규칙을 검증한다. Excel은 먼저 YAML로 변환한다.
 - `run`: 검증 후 세션별 curl 시나리오를 병렬 실행하고 결과 Excel을 생성한다. 세션 안의 호출은 순차 실행하며 `--debug` 시 curl 입력·출력 로그와 파일 하이퍼링크를 추가한다.
 - `convert postman`: Postman Collection을 Excel 형식으로 변환한다.
 - `convert jmeter`: JMeter JMX를 Excel 형식으로 변환한다.
@@ -152,6 +158,8 @@ Excel은 시나리오 작성·검토·외부 도구 변환을 위한 교환 형�
 
 호스트는 `host.<name>.baseUrl`, 선택적 `host.<name>.referenceUrl`, `host.<name>.connectTimeoutMs`, `host.<name>.readTimeoutMs` 키로 정의할 수 있다. 런타임 `hosts.<name>` 설정이 같은 키를 덮어쓴다.
 
+`compareSkipHeader`와 `compareSkipBody`는 개행 단위 목록이며 `common`에 기본값, `host.<name>.compareSkipHeader/compareSkipBody`에 host별 값을 정의한다. 런타임 `hosts.<name>` 설정이 최우선이며 빈 문자열은 규칙을 해제한다. 헤더는 대소문자를 무시한 이름, 본문은 `$`로 시작하는 JSONPath 노드 선택식으로 해석한다. 빈 줄·없는 경로는 무시하고 문법 오류는 실행 전에 거부한다. 상세 비교 및 원문 보존 계약은 37절을 따른다.
+
 #### `result_format`
 
 | key | value | 필수 | 설명 |
@@ -217,33 +225,30 @@ Excel은 시나리오 작성·검토·외부 도구 변환을 위한 교환 형�
 ```text
 cli
  ├─ template / validate / run / convert 명령
-input
- ├─ Excel 읽기·쓰기
- ├─ YAML 읽기
- └─ 입력 검증 및 실행 모델 조립
+ └─ 출력 파일 timestamp 보관 및 변환 오류 진단
+input.excel
+ └─ Excel 템플릿 생성
+scenario
+ ├─ ScenarioDocument
+ └─ ScenarioExcelCodec / ScenarioYamlCodec
 execution
- ├─ 세션별 독립 실행 컨텍스트
- ├─ 세션 병렬 실행 및 세션 안의 순차 호출
- ├─ 대기 정책
- └─ 중단 상태 관리
+ ├─ ScenarioRunPlanReader / ScenarioRunPlan
+ ├─ ScenarioRunner / CallResult / WaitPolicy
+ └─ ReferenceTarget / ReferenceComparison / ComparisonRules
 http
- └─ REST 요청 및 응답 캡처
+ ├─ CurlHttpClient / CurlRequest / CurlResponse
+ └─ ResponseHeaders / ResponseBodyFormatter
 script
- ├─ JEXL 엔진
- ├─ 컨텍스트 생성
- └─ 스크립트 단계별 실행
+ └─ JexlRuntime / ScriptContext / ExecutionControl
 conversion
  ├─ Postman 변환
  └─ JMeter 변환
 report
- ├─ 통계 계산
- ├─ Excel 결과 출력 및 curl 로그 링크
- └─ YAML 결과 출력 (후속 기능)
-domain
- └─ 불변 실행 모델과 결과 모델
+ ├─ StatisticsCalculator / TimingStatistics
+ └─ ExecutionExcelWriter
 ```
 
-입력 계층은 실행 기준 YAML을 도메인 실행 모델로 변환한다. Excel은 YAML과 양방향 변환되는 교환 형식이며 실행 계층에서 직접 읽지 않는다. 실행 계층은 파일 형식에 의존하지 않으며, HTTP와 스크립트 실행은 인터페이스로 주입받는다.
+ScenarioYamlCodec가 문서를 읽고 ScenarioRunPlanReader가 런타임 host 설정·환경 변수·파일 참조·JEXL·JSONPath를 검증해 실행 계획을 만든다. Excel은 YAML과 양방향 변환되는 교환 형식이며 실행 계층에서 직접 읽지 않는다. ScenarioRunner가 세션별 CurlHttpClient와 ScriptContext를 생성하고 불변 계획을 공유한다. 결과는 ExecutionExcelWriter가 저장하며 YAML 결과 writer는 후속 기능이다.
 
 ## 8. 실행 흐름
 
@@ -254,7 +259,7 @@ domain
 5. JEXL 스크립트를 미리 컴파일하여 문법 오류를 검출한다.
 6. 각 세션의 독립 global/executor 컨텍스트와 쿠키 저장소를 만든다.
 7. 세션을 병렬 실행하며 세션마다 설정된 iteration 횟수만큼 메인 시나리오를 반복한다.
-8. 각 메인 행에서 subset, 전처리, HTTP 호출, 필터, 검증, 후처리를 순서대로 수행한다.
+8. subset을 HTTP 단계로 확장하고 각 단계에서 PRE → 요청 치환 → base curl → 선택적 reference curl·비교 → FILTER → VALIDATE → POST를 수행한다.
 9. 호출 사이에 지정한 대기 정책을 적용한다.
 10. 결과를 모아 통계를 계산하고 Excel 파일을 원자적으로 저장한다. debug 시 호출별 curl 로그 링크를 포함한다.
 11. 실패 유무에 따라 프로세스 종료 코드를 결정한다.
@@ -276,21 +281,22 @@ domain
 
 `response`는 HTTP 호출 이후 단계에서만 제공한다. 응답 본문은 원문 문자열이며 JSON인 경우 `response.json`으로 파싱된 객체도 제공한다.
 
-- `control.stop(reason)`: 현재 실행에 협력적 중단 신호를 보낸다.
+- `control.stop(reason)`: 현재 세션에 협력적 중단 신호를 보낸다.
 - `VALIDATE` 스크립트는 boolean을 반환해야 하며 `false`는 호출 실패다.
 - `FILTER`와 `POST` 스크립트는 반환값을 요구하지 않으며 `executor`에 값을 저장할 수 있다.
 - path, header 값, body의 `${expression}`은 JEXL 표현식 결과로 치환한다.
 
-JEXL 3.7의 `SECURE` 권한을 사용하고 `ExecutionControl`의 중단 메서드만 명시적으로 추가한다. Map 변경을 위해 global side effect를 허용하지만 최상위 컨텍스트 바인딩 교체는 금지한다. 클래스 생성, pragma, annotation, lambda, 반복문은 금지한다. 템플릿 엔진은 대입도 금지한다. 반사·파일·프로세스 접근은 권한으로 제한한다. 전체 실행 중단은 공유 중단 토큰으로 처리한다.
+JEXL 3.7의 `SECURE` 권한을 사용하고 `ExecutionControl`의 중단 메서드만 명시적으로 추가한다. Map 변경을 위해 global side effect를 허용하지만 최상위 컨텍스트 바인딩 교체는 금지한다. 클래스 생성, pragma, annotation, lambda, 반복문은 금지한다. 템플릿 엔진은 대입도 금지한다. 반사·파일·프로세스 접근은 권한으로 제한한다. global/executor와 중단 상태는 세션별로 격리하며 실행 취소·파일 처리 오류에서는 coordinator가 전체 세션을 취소하고 자원을 정리한다.
 
 ## 10. HTTP 실행
 
-- API 호출은 curl 프로세스로 수행한다. 상세 debug 및 결과 Excel 규칙은 18절을 따른다.
+- API 호출은 curl 프로세스로 수행하며 모든 호출에 `--insecure`를 적용한다. 상세 debug 및 최신 결과 Excel 규칙은 24절, 29절, 31~37절을 따른다.
 
-- 실행 컨텍스트의 쿠키 저장소를 유지하여 인증 흐름을 지원한다.
+- 세션별 base/reference 쿠키 저장소를 분리하고 같은 세션의 반복 사이에는 유지하여 인증 흐름을 지원한다.
 - subset과 main 호출은 같은 쿠키 저장소 및 executor 변수를 사용한다.
 - 헤더와 본문은 템플릿 치환 후 전송한다.
-- 응답 본문은 보고서 크기를 제한하기 위해 설정된 최대 길이까지만 상세 결과에 보존할 수 있다.
+- 헤더·본문이 4096 Unicode code point 이하면 Excel 셀에 기록하고 초과하면 UTF-8 big/UUID.txt에 전체 내용을 저장해 상대 링크를 제공한다. 유효한 JSON 본문은 pretty 변환 후 길이를 판단하며 자르지 않는다.
+- reference 비교는 제외 규칙 적용 → JSON pretty → HTTP/HTTPS 정규화 순서다. 보고서·curl 로그·스크립트는 제외 전 전체 응답을 사용한다.
 - 연결 제한시간과 전체 호출 제한시간은 호스트별로 적용한다. curl의 전체 호출 제한은 연결·읽기 설정값의 합이며 idle-read timeout과는 구별한다.
 - 기본 자동 재시도는 수행하지 않는다. 비멱등 요청의 중복 전송을 방지하기 위함이다.
 
@@ -309,6 +315,8 @@ JEXL 3.7의 `SECURE` 권한을 사용하고 `ExecutionControl`의 중단 메서�
 - 순환 subset 참조
 - 정의되지 않은 환경 변수
 - 양의 정수가 아닌 `sessions` 설정
+- 잘못된 referenceUrl 또는 compareSkipHeader/compareSkipBody 설정
+- 요청의 ref: 파일을 읽을 수 없거나 파일 내용이 잘못된 헤더인 경우
 
 Excel 관련 오류는 시트명, 행, 컬럼을 포함한다.
 
@@ -322,11 +330,11 @@ Excel 관련 오류는 시트명, 행, 컬럼을 포함한다.
 - 필터, 검증, 후처리 스크립트 예외
 - 검증 스크립트의 `false` 반환
 
-`continueOnFailure=false`이면 현재 실행을 중단한다. `true`이면 후처리 가능 범위까지 기록한 후 다음 메인 행으로 진행한다.
+`continueOnFailure=false`이면 현재 세션을 중단한다. `true`이면 다음 단계로 진행한다. reference의 호출 오류·비교 불일치는 comparison 결과로 기록하며 base의 success와 세션 중단 정책을 변경하지 않는다. CLI 종료 코드도 base 호출 실패를 기준으로 한다.
 
 ### 11.3 명시적 중단
 
-- `stop`: 새 호출 시작을 막고 실행 중 호출이 반환되면 현재 실행을 `STOPPED`로 종료한다.
+- `control.stop`: 현재 세션의 다음 curl 호출을 막는다. PRE에서 중단하면 실제 호출 없이 실패 행을 기록한다. 다른 세션은 계속 실행한다.
 - 중단 사유는 결과 보고서에 기록한다.
 
 ## 12. 결과 YAML (후속 기능 설계)
@@ -414,6 +422,10 @@ warnings: []
 
 | 날짜 | 변경 내용 |
 |---|---|
+| 2026-10-05 | README와 현재 명세를 최신 코드에 맞춰 정리. GitHub 저장소·빠른 시작, 병렬 세션 격리, ref: 파일 참조, reference 비교·JSONPath 제외, 전체 응답 저장 및 결과 컬럼 안내 추가. 실제 패키지 구조와 과거 분석의 이력 구분 명시. 코드 구조 변경 없음 |
+| 2026-10-05 | ComparisonRules와 JSONPath 의존성 추가. 개행 헤더명·JSONPath 본문 제외, 설정 우선순위, 원본 JSON 토큰 보존 및 모호한 선택 오류 처리. 상세 이력 37절 |
+| 2026-10-05 | ReferenceTarget/ReferenceComparison 및 HTTP 응답 공통 처리 추가. referenceUrl 비교, TLS 검증 비활성화, scheme 정규화, pretty JSON 저장·비교와 big 응답 링크 구현. 상세 이력 31~36절 |
+| 2026-10-05 | ref: 요청 파일 참조, 세션별 virtual thread·변수·쿠키 격리와 session 첫 컬럼 지원. 상세 이력 28~30절 |
 | 2026-10-05 | 기존 결과 보관 접미사를 UUID에서 timestamp(`yyyyMMdd_HHmmss_SSS`)로 변경. 같은 timestamp 충돌에는 일련번호를 추가하고 변환 결과·경고 파일에는 같은 timestamp 적용 |
 | 2026-10-05 | 사용자 요청으로 기존 결과 보관 UUID를 접두사에서 접미사로 변경. 파일명 뒤·마지막 확장자 앞에 UUID를 추가하며 변환·run·경고 YAML에 동일 적용 |
 | 2026-10-05 | subset 내부 curl 호출에 main과 동일한 debug 로그·Excel 링크 계약을 명시. SUBSET/preSubsets, 여러 행·반복·HTTP 및 POST 실패·비debug 동작의 실제 curl 회귀 테스트 추가 |
@@ -434,7 +446,7 @@ warnings: []
 
 ## 17. 프로젝트 분석 — 2026-10-05
 
-이 절은 curl 실행 구현 이전의 분석 기록이다. 이후 구현 현황과 실행 규칙은 18절을 따른다.
+이 절은 curl 실행 구현 이전의 분석 기록이다. 현재 구현은 1~11절과 28~37절을 따르며 아래의 미구현 표기는 당시 상태를 설명한다.
 
 ### 17.1 종합 판단
 

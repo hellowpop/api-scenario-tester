@@ -2,6 +2,29 @@
 
 Excel로 작성하고 YAML로 변환한 REST API 시나리오를 curl 명령으로 실행하는 Java CLI 프로젝트입니다. `common.sessions`로 병렬 세션 수를 지정하고, 각 세션 안의 호출은 순차 실행합니다. 실행 결과는 Excel로 생성하며, debug 모드에서는 각 호출의 입력·출력 로그를 결과 Excel의 하이퍼링크로 확인할 수 있습니다.
 
+저장소: [hellowpop/api-scenario-tester](https://github.com/hellowpop/api-scenario-tester). 기술 명세와 구조 변경 이력은 [project.md](project.md)에 기록합니다.
+
+## 빠른 시작
+
+JDK 21, Maven과 curl을 준비한 후 저장소를 받아 빌드합니다.
+
+```powershell
+git clone https://github.com/hellowpop/api-scenario-tester.git
+Set-Location api-scenario-tester
+mvn package
+java -jar target/api-scenario-tester.jar convert excel `
+  --input samples/auth/sample-scenario.xlsx --output outputs/auth-scenario.yml
+java -jar target/api-scenario-tester.jar validate --scenario outputs/auth-scenario.yml
+```
+
+로그인 샘플은 login → 사용자 목록 → 사용자 상세 → logout 순서입니다. 실제 API 주소를 아래의 런타임 설정 예시에 맞춰 `runtime.yml`로 작성한 후 실행합니다.
+
+```powershell
+java -jar target/api-scenario-tester.jar run `
+  --scenario outputs/auth-scenario.yml --config runtime.yml `
+  --output outputs/results.xlsx --debug
+```
+
 ## 요구 사항
 
 - JDK 21
@@ -108,6 +131,10 @@ YAML은 `version`, `common`, `resultFormat`, `scripts`, `subScenarios`, `mainSce
 - 구현됨: 병렬 세션, 세션별 curl 기반 main/subset 순차 호출, 반복, 쿠키 유지, 대기·실패 정책
 - 구현됨: Excel 실행 결과와 debug curl 로그 하이퍼링크
 - 구현됨: JEXL PRE/FILTER/VALIDATE/POST, 전역변수 저장·삭제, 표현식 치환 및 중단 API
+- 구현됨: 요청 헤더·본문의 `ref:` UTF-8 파일 참조
+- 구현됨: `referenceUrl` 호출과 상태·헤더·본문 비교, HTTP/HTTPS 차이 정규화
+- 구현됨: 개행으로 지정한 `compareSkipHeader` 및 JSONPath `compareSkipBody` 비교 제외
+- 구현됨: JSON pretty 저장·비교와 4096자 초과 응답의 `big/<uuid>.txt` 하이퍼링크
 - 다음 단계: YAML 결과 보고서
 
 ## curl 실행과 debug 로그
@@ -134,6 +161,16 @@ java -jar target/api-scenario-tester.jar run `
 - debug 미사용 시 로그 폴더를 생성하지 않으며 `curlLog` 셀은 비어 있습니다.
 - `--output` 생략 시 `resultFormat.output`을 사용합니다. 기본값은 `results.xlsx`이며, 이전 `.yml`/`.yaml` 설정은 `.xlsx`로 치환합니다. 기존 결과 파일은 같은 폴더의 `<원본명>_<timestamp>.<확장자>`로 이름을 변경해 보관하고 새 결과를 원래 경로에 저장합니다.
 - 종료 코드: 전체 성공 `0`, HTTP·curl 호출 실패 `1`, 입력·파일 처리 오류 `2`.
+
+`calls`의 첫 컬럼은 `session`이며 다음 순서로 기록합니다.
+
+| 구분 | 컬럼 순서 |
+|---|---|
+| base 호출 | `session`, `iteration`, `order`, `name`, `method`, `url`, `status`, `curlExitCode`, `elapsedMs`, `success`, `error`, `curlLog` |
+| reference 호출·비교 | `referenceUrl`, `referenceStatus`, `referenceCurlExitCode`, `referenceElapsedMs`, `statusMatch`, `headersMatch`, `responseMatch`, `comparisonMatch`, `comparisonDetail`, `referenceCurlLog` |
+| 전체 수신 응답 | `responseHeaders`, `responseBody`, `referenceResponseHeaders`, `referenceResponseBody` |
+
+`success`와 CLI 종료 코드는 base 호출의 결과를 기준으로 합니다. reference 비교 불일치는 `comparisonMatch=false`와 비교 집계에 표시되며, 그 자체로 종료 코드 `1`을 만들지 않습니다.
 
 요청 정의의 `headers`와 `body`는 `ref:` 접두사로 UTF-8 파일을 참조할 수 있습니다. 상대 경로는 실행할 시나리오 YAML의 폴더 기준이며 절대 경로도 허용합니다.
 
@@ -181,6 +218,26 @@ host에 `referenceUrl`이 있으면 base 호출 후 기준 서버에도 동일�
 
 Excel `common` 시트 또는 시나리오 YAML `common`에서는 `host.api.compareSkipHeader`, `host.api.compareSkipBody` 값을 개행으로 작성합니다. 공통 기본값은 `common.compareSkipHeader`, `common.compareSkipBody`이며 host별 설정이 이를 덮어씁니다. 런타임 `hosts.api` 설정이 최우선이고, 빈 문자열은 제외 규칙을 해제합니다. 이 속성은 `referenceUrl` 비교가 있는 호출에 적용됩니다.
 
+시나리오 YAML에 병렬 실행과 host별 비교 규칙을 함께 정의하는 예입니다. Excel에서는 각 키를 `common` 시트의 `key` 컬럼에, 여러 줄 값을 하나의 `value` 셀에 작성합니다.
+
+```yaml
+common:
+  sessions: "3"
+  iterations: "2"
+  host.api.baseUrl: http://localhost:8080
+  host.api.referenceUrl: http://localhost:8081
+  host.api.compareSkipHeader: |-
+    Date
+    X-Request-Id
+    Content-Length
+  host.api.compareSkipBody: |-
+    $.timestamp
+    $.users[*].updatedAt
+    $..requestId
+```
+
+JSONPath는 `$`로 시작하는 노드 선택식입니다. property union, 음수 배열 인덱스도 지원합니다. JSONPath 함수 등 노드로 해석할 수 없는 선택이나 모호한 경로는 비교 오류로 기록합니다. 제외되지 않은 JSON 필드·배열 순서, 중복 필드와 숫자의 원래 표기는 비교에 남습니다. 헤더 제외 규칙은 본문에서 자동으로 유도하지 않으므로 본문 길이가 달라지는 경우 `Content-Length` 제외 여부도 설정합니다.
+
 `success`, 실패 중단 정책과 응답시간 통계는 baseUrl 호출을 기준으로 판정합니다. 기준 서버의 curl·런타임 URL 치환 오류는 비교 실패로 기록하며 base 응답 스크립트를 수행합니다. debug에서는 양쪽 호출을 UUID 로그로 저장하며 기준 호출 링크는 `referenceCurlLog`입니다. JEXL의 response와 토큰 추출은 base 응답을 사용합니다.
 
 reference 비교에서 헤더 값과 본문에 포함된 `http://`와 `https://`는 동일하게 취급합니다. 비교용 문자열만 정규화하며 실제 호출 URL, 응답 원문, curl 로그는 보존합니다. URL의 호스트·포트·경로·쿼리 차이는 비교에 포함합니다. JSON 문자열 값 내부와 비JSON 본문의 공백·개행은 보존합니다. 본문 차이 위치와 길이는 pretty 변환 및 scheme 정규화 후 문자열을 기준으로 표시합니다.
@@ -189,7 +246,7 @@ reference 비교에서 헤더 값과 본문에 포함된 `http://`와 `https://`
 
 `scripts`의 `id`, `phase`, `body`를 정의하고 호출 행의 `preScripts`, `filterScripts`, `validationScripts`, `postScripts`에 쉼표로 구분한 ID를 지정합니다. 문법, 중복 ID, 참조 및 phase는 실행 전에 검사합니다.
 
-순서는 PRE → 요청 치환 → curl → FILTER → VALIDATE → POST입니다. `global`과 `executor`는 실행 전체에서 공유하는 변경 가능한 Map이고, 실행을 다시 시작하면 초기화됩니다. `scenario`와 `response`는 읽기 전용입니다. PRE의 `request.path`는 기본적으로 전체 URL이며 상대 경로로 덮어쓸 수도 있습니다. `request.method`, `request.headers`, `request.body`도 수정할 수 있습니다.
+순서는 PRE → 요청 치환 → base curl → 선택적 reference curl 및 비교 → FILTER → VALIDATE → POST입니다. `global`과 `executor`는 같은 세션의 main/subset과 iteration 사이에서 공유하는 변경 가능한 Map이며 세션별로 격리됩니다. 실행을 다시 시작하면 초기화됩니다. `scenario`와 `response`는 읽기 전용입니다. PRE의 `request.path`는 기본적으로 전체 URL이며 상대 경로로 덮어쓸 수도 있습니다. `request.method`, `request.headers`, `request.body`도 수정할 수 있습니다.
 
 ```jexl
 // POST: 로그인 토큰 추출
